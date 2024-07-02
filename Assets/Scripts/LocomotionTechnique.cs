@@ -409,7 +409,7 @@ public class LocomotionTechnique : MonoBehaviour
                     {
                         destination = hit.point;
                         hitDetected = true;
-                       
+                        
                     }
                 }
                 transform.position = Vector3.Lerp(startPosition, points[i], percent);
