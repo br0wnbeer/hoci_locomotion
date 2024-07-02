@@ -15,6 +15,8 @@ public class LocomotionTechnique : MonoBehaviour
 
     public OVRInput.Controller leftController;
     public OVRInput.Controller rightController;
+    public Transform right; 
+    
     [Range(0, 10)] public float translationGain = 0.5f;
     public GameObject hmd;
     [SerializeField] private float leftTriggerValue;    
@@ -39,6 +41,8 @@ public class LocomotionTechnique : MonoBehaviour
     private bool can_jump =true; 
     public LocomotionMode currentMode;
     public TextMeshPro mode;
+    private bool hitDetected;
+    private Vector3 inintial_start;
     public enum LocomotionMode
     {
         Nothing,
@@ -66,13 +70,14 @@ public class LocomotionTechnique : MonoBehaviour
 
     void Update()
     
-    {
-        Debug.Log("Current Locomotion Mode: " + currentMode);
+    {   
+        
         if (OVRInput.GetDown(OVRInput.Button.Four))
         {
             ToggleLocomotionMode();
         }
         if (!can_jump) return;
+        inintial_start = transform.position;
         switch (currentMode)
         {
             case LocomotionMode.Tilt:
@@ -82,15 +87,19 @@ public class LocomotionTechnique : MonoBehaviour
                 HandleInputNothing();
                 break;
             case LocomotionMode.Hands:
+                //Vector3 fixedPosition = hmd.transform.position + hmd.transform.forward * 0.5f; // 0.5 meters in front of the camera
+                //right.transform.position = fixedPosition;
+               
                 HandleInputHands();
                 break;
         }
         
     }
+   
+
     private void ToggleLocomotionMode()
     {
         currentMode = (LocomotionMode)(((int)currentMode + 1) % System.Enum.GetValues(typeof(LocomotionMode)).Length);
-        Debug.Log("Current Locomotion Mode: " + currentMode);
         mode.SetText("Mode : " + currentMode) ;
     }
 
@@ -213,41 +222,110 @@ public class LocomotionTechnique : MonoBehaviour
     void RenderArc()
     {
         Vector3 start = hmd.transform.position;
-        Vector3 forwardDirection = hmd.transform.forward;
-        Vector3 end = start + forwardDirection * maxDistance;
-
-        Vector3 control = (start + end) / 2 + Vector3.up * arcHeight;
-        points = new Vector3[20];
-
-        for (int i = 0; i < points.Length; i++)
+        Vector3 end ;
+        if (Physics.Raycast(start, hmd.transform.forward, out RaycastHit initialHit, maxDistance, teleportMask))
         {
-            float t = i / (float)(points.Length - 1);
-            points[i] = Mathf.Pow(1 - t, 2) * start + 2 * (1 - t) * t * control + Mathf.Pow(t, 2) * end;
-        }
-
-        line.positionCount = points.Length;
-        line.SetPositions(points);
-
-        RaycastHit hit;
-        if (Physics.Raycast(points[points.Length - 1], Vector3.down, out hit, 10f, teleportMask))
-        {
-            destination = hit.point;
+            Debug.LogWarning("Render Arc on terrain");
+            end = initialHit.point;
         }
         else
         {
-            destination = points[points.Length - 1];
+            Debug.LogWarning("render Arc outside Terrain");
+            end = start + hmd.transform.forward * maxDistance;
+        }
+        Vector3 control = (start + end) / 2 + Vector3.up * arcHeight;
+        int numPoints = 20;
+        points = new Vector3[numPoints];
+        hitDetected = false;
+
+        for (int i = 0; i < numPoints; i++)
+        {
+            float t = i / (float)(numPoints - 1);
+            points[i] = CalculateQuadraticBezierPoint(t, start, control, end);
+
+            // Perform raycast to check for collisions
+            if (i > 0)
+            {
+                Vector3 direction = (points[i] - points[i - 1]).normalized;
+                float distance = Vector3.Distance(points[i], points[i - 1]);
+                if (Physics.Raycast(points[i - 1], direction, out RaycastHit hit, distance, teleportMask))
+                {
+                    if (IsValidSurface(hit))
+                    {
+                        destination = hit.point;
+                        hitDetected = true;
+                        break;
+                    }
+                }
+            }
         }
 
-        Debug.Log("Arc End Position: " + points[points.Length - 1]);
-        Debug.Log("Calculated Destination: " + destination);
+        if (!hitDetected)
+        {
+            for (int i = numPoints - 1; i >= 0; i--)
+            {
+                if (Physics.Raycast(points[i], Vector3.down, out RaycastHit hit, 10f, teleportMask))
+                {
+                    if (IsValidSurface(hit))
+                    {
+                        destination = hit.point;
+                        hitDetected = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!hitDetected)
+        {
+            CalculateDestination();
+        }
+        line.positionCount = hitDetected ? points.Length : numPoints;
+        line.SetPositions(points);
     }
 
+    private bool IsValidSurface(RaycastHit hit)
+    {
+        float angle = Vector3.Angle(hit.normal, Vector3.up);
+        return angle <= 40.0f;
+    }
+
+    private Vector3 CalculateQuadraticBezierPoint(float t, Vector3 p0, Vector3 p1, Vector3 p2)
+    {
+        float oneMinusT = 1f - t;
+        return oneMinusT * oneMinusT * p0 +
+               2f * oneMinusT * t * p1 +
+               t * t * p2;
+    }
+    private void CalculateDestination()
+    {
+        if (!hitDetected)
+        {
+            Vector3 endPoint = points[points.Length - 1];
+            if (Physics.Raycast(endPoint, Vector3.down, out RaycastHit hit, 10f, teleportMask))
+            {
+                if (IsValidSurface(hit))
+                {
+                    destination = hit.point;
+                }
+                else
+                {
+                    destination = endPoint;
+                }
+            }
+            else
+            {
+                destination = endPoint;
+            }
+        }
+    }
+    
     IEnumerator MoveAlongArcNothing()
     {
         can_jump = false; // Disable jumping during cooldown
         DisableInput();
 
-        for (int i = 0; i < points.Length - 1; i++)
+        for (int i = 0; i < points.Length - 2; i++)
         {
             Vector3 startPosition = transform.position;
             Vector3 endPosition = points[i + 1];
@@ -282,29 +360,26 @@ public class LocomotionTechnique : MonoBehaviour
             {
                 journey += Time.deltaTime;
                 float percent = Mathf.Clamp01(journey / duration);
+                
+                if (Physics.Raycast(startPosition, points[i], out RaycastHit hit,
+                        (startPosition - points[i]).sqrMagnitude, teleportMask))
+                {
+                    
+                    
+                        destination = hit.point;
+                        hitDetected = true;
+                       
+                }
                 transform.position = Vector3.Lerp(startPosition, points[i], percent);
-
-                // Adjust the destination based on head tilt during flight
+                
                 AdjustDestinationBasedOnControllerRotation();
+                
+                
 
                 yield return null;
             }
 
             // Recalculate the remaining points in the arc based on the new destination
-            if (i < points.Length - 1)
-            {
-                Vector3 currentPos = transform.position;
-                Vector3 forwardDirection = hmd.transform.forward;
-                Vector3 end = currentPos + forwardDirection * maxDistance;
-
-                Vector3 control = (currentPos + end) / 2 + Vector3.up * arcHeight;
-                for (int j = i + 1; j < points.Length; j++)
-                {
-                    float t = (j - i) / (float)(points.Length - i - 1);
-                    points[j] = Mathf.Pow(1 - t, 2) * currentPos + 2 * (1 - t) * t * control + Mathf.Pow(t, 2) * end;
-                }
-                line.SetPositions(points);
-            }
         }
 
         StopAiming();
@@ -326,29 +401,28 @@ public class LocomotionTechnique : MonoBehaviour
             {
                 journey += Time.deltaTime;
                 float percent = Mathf.Clamp01(journey / duration);
+                
+                if (Physics.Raycast(startPosition, points[i], out RaycastHit hit,
+                        (startPosition - points[i]).sqrMagnitude, teleportMask))
+                {
+                  
+                    {
+                        destination = hit.point;
+                        hitDetected = true;
+                       
+                    }
+                }
                 transform.position = Vector3.Lerp(startPosition, points[i], percent);
-
                 // Adjust the destination based on head tilt during flight
+               
                 AdjustDestinationBasedOnHeadTilt();
+               
+                
 
                 yield return null;
             }
 
             // Recalculate the remaining points in the arc based on the new destination
-            if (i < points.Length - 1)
-            {
-                Vector3 currentPos = transform.position;
-                Vector3 forwardDirection = hmd.transform.forward;
-                Vector3 end = currentPos + forwardDirection * maxDistance;
-
-                Vector3 control = (currentPos + end) / 2 + Vector3.up * arcHeight;
-                for (int j = i + 1; j < points.Length; j++)
-                {
-                    float t = (j - i) / (float)(points.Length - i - 1);
-                    points[j] = Mathf.Pow(1 - t, 2) * currentPos + 2 * (1 - t) * t * control + Mathf.Pow(t, 2) * end;
-                }
-                line.SetPositions(points);
-            }
         }
 
         StopAiming();
@@ -358,41 +432,64 @@ public class LocomotionTechnique : MonoBehaviour
 
     void AdjustDestinationBasedOnHeadTilt()
     {
-        float y = destination.y;
-        float tilt = hmd.transform.eulerAngles.x;
-        if (tilt > 180) tilt -= 360; // Normalize tilt to -180 to 180
-
-        if (Mathf.Abs(tilt) > tiltSensitivity)
+        
+        
+        Vector3 endAdjusted = inintial_start + new Vector3(hmd.transform.forward.x, 0, hmd.transform.forward.z) * (maxDistance + 10* ((hmd.transform.forward.y +1) / 2 ));
+        Vector3 controlAdjusted = (inintial_start + endAdjusted) / 2 + Vector3.up * arcHeight;
+       Debug.LogWarning("Current Adjustment Y : " +hmd.transform.forward.y  );
+        for (int i = 0; i < 20; i++)
         {
-            Vector3 rightVector = Vector3.Cross(Vector3.up, hmd.transform.forward).normalized;
-            // Make small adjustments to the destination along the right vector only
-            Vector3 adjustment = rightVector * (tilt * tiltSensitivity * 0.001f);
-            destination += adjustment;
+            float adjustedT = i / (float)(20 - 1);
+            points[i] = CalculateQuadraticBezierPoint(adjustedT, inintial_start, controlAdjusted, endAdjusted) + new Vector3(0, hmd.transform.forward.y ,0) * 3;
+
+            if (i > 0)
+            {
+                Vector3 direction = (points[i] - points[i - 1]).normalized;
+                float distance = Vector3.Distance(points[i], points[i - 1]);
+                if (Physics.Raycast(points[i - 1], direction, out RaycastHit hit, distance, teleportMask))
+                {
+                    if (IsValidSurface(hit))
+                    {
+                        destination = hit.point;
+                        hitDetected = true;
+                        break;
+                    }
+                }
+            }
         }
+
+        line.positionCount = points.Length;
+        line.SetPositions(points);
     }
     void AdjustDestinationBasedOnControllerRotation()
     {
-        Vector3 leftHandPosition = OVRInput.GetLocalControllerPosition(leftController);
-        Vector3 rightHandPosition = OVRInput.GetLocalControllerPosition(rightController);
+        
+        Vector3 endAdjusted = inintial_start + new Vector3(right.transform.forward.x, 0, right.transform.forward.z) * (maxDistance + 10* ((right.transform.forward.y +1) / 2 ));
+        Vector3 controlAdjusted = (inintial_start + endAdjusted) / 2 + Vector3.up * arcHeight;
+        Debug.LogWarning("Current Adjustment Y : " +hmd.transform.forward.y  );
+        for (int i = 0; i < 20; i++)
+        {
+            float adjustedT = i / (float)(20 - 1);
+            points[i] = CalculateQuadraticBezierPoint(adjustedT, inintial_start, controlAdjusted, endAdjusted) + new Vector3(0,right.transform.forward.y ,0) * 3;
 
-        // Calculate the midpoint between the controllers
-        Vector3 midpoint = (leftHandPosition + rightHandPosition) / 2;
+            if (i > 0)
+            {
+                Vector3 direction = (points[i] - points[i - 1]).normalized;
+                float distance = Vector3.Distance(points[i], points[i - 1]);
+                if (Physics.Raycast(points[i - 1], direction, out RaycastHit hit, distance, teleportMask))
+                {
+                    if (IsValidSurface(hit))
+                    {
+                        destination = hit.point;
+                        hitDetected = true;
+                        break;
+                    }
+                }
+            }
+        }
 
-        // Calculate the forward direction based on the controllers' positions
-        Vector3 controllerForward = (rightHandPosition - leftHandPosition).normalized;
-        Vector3 rightVector = Vector3.Cross(Vector3.up, controllerForward).normalized;
-
-        // Calculate the adjustment
-        float adjustmentFactor = Vector3.Distance(leftHandPosition, rightHandPosition) * 0.001f; // Scale as needed
-        Vector3 adjustment = rightVector * adjustmentFactor;
-
-        // Update the destination only along the horizontal plane
-        Vector3 newDestination = destination + adjustment;
-        newDestination.y = destination.y; // Ensure the y-coordinate of the destination remains unchanged
-
-        destination = newDestination;
-        Debug.Log("Adjusted Destination: " + destination);
-        RenderArc();
+        line.positionCount = points.Length;
+        line.SetPositions(points);
     }
 
     private void DisableInput()
