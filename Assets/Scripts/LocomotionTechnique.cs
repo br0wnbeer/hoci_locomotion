@@ -15,8 +15,8 @@ public class LocomotionTechnique : MonoBehaviour
 
     public OVRInput.Controller leftController;
     public OVRInput.Controller rightController;
-    public Transform right; 
-    
+    public Transform right;
+    public int num_teleports = 0;
     [Range(0, 10)] public float translationGain = 0.5f;
     public GameObject hmd;
     [SerializeField] private float leftTriggerValue;    
@@ -43,6 +43,7 @@ public class LocomotionTechnique : MonoBehaviour
     public TextMeshPro mode;
     private bool hitDetected;
     private Vector3 inintial_start;
+    public TextMeshPro num_teleports_field;  
     public enum LocomotionMode
     {
         Nothing,
@@ -66,16 +67,24 @@ public class LocomotionTechnique : MonoBehaviour
         currentMode = LocomotionMode.Tilt;
         mode.SetText("Mode : " + currentMode) ;
         mode.color = Color.red;
+        num_teleports_field.color = Color.green;
+        num_teleports_field.SetText("NumTeleports : " + num_teleports);
     }
 
     void Update()
     
     {   
-        
+        if (OVRInput.GetDown(OVRInput.Button.Start))
+        {
+            num_teleports = 0;
+        }
+        num_teleports_field.SetText("NumTeleports : " + num_teleports);
         if (OVRInput.GetDown(OVRInput.Button.Four))
         {
             ToggleLocomotionMode();
         }
+
+        
         if (!can_jump) return;
         inintial_start = transform.position;
         switch (currentMode)
@@ -127,6 +136,7 @@ public class LocomotionTechnique : MonoBehaviour
 
             if (OVRInput.GetDown(OVRInput.Button.PrimaryHandTrigger))
             {
+                num_teleports += 1; 
                 StartCoroutine(MoveAlongArc());
             }
         }
@@ -161,6 +171,7 @@ public class LocomotionTechnique : MonoBehaviour
 
             if (OVRInput.GetDown(OVRInput.Button.PrimaryHandTrigger))
             {
+                num_teleports += 1; 
                 StartCoroutine(MoveAlongArcHands());
             }
         }
@@ -194,7 +205,9 @@ public class LocomotionTechnique : MonoBehaviour
             //AdjustDestinationBasedOnHeadTilt();
 
             if (OVRInput.GetDown(OVRInput.Button.PrimaryHandTrigger))
+                
             {
+                num_teleports += 1; 
                 StartCoroutine(MoveAlongArcNothing());
             }
         }
@@ -342,7 +355,7 @@ public class LocomotionTechnique : MonoBehaviour
         }
 
         StopAiming();
-        yield return new WaitForSeconds(3.0f); // Wait for the cooldown period
+        yield return new WaitForSeconds(1.0f); // Wait for the cooldown period
         EnableInput();
     }
     IEnumerator MoveAlongArcHands()
@@ -383,7 +396,7 @@ public class LocomotionTechnique : MonoBehaviour
         }
 
         StopAiming();
-        yield return new WaitForSeconds(3.0f); // Wait for the cooldown period
+        yield return new WaitForSeconds(1.0f); // Wait for the cooldown period
         EnableInput();
     }
     IEnumerator MoveAlongArc()
@@ -426,7 +439,7 @@ public class LocomotionTechnique : MonoBehaviour
         }
 
         StopAiming();
-        yield return new WaitForSeconds(3.0f); // Wait for the cooldown period
+        yield return new WaitForSeconds(1.0f); // Wait for the cooldown period
         EnableInput();
     }
 
